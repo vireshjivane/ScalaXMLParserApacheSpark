@@ -2,12 +2,7 @@
  * Created by Viresh on 5/26/2015.
  */
 
-import java.io.BufferedReader
-import java.io.InputStream
-import java.io.InputStreamReader
-import java.io.BufferedWriter
-import java.io.File
-import java.io.FileWriter
+import java.io._
 import com.amazonaws.AmazonClientException
 import com.amazonaws.AmazonServiceException
 import com.amazonaws.ClientConfiguration
@@ -33,17 +28,17 @@ import com.amazonaws.regions.Region
 import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3Client
 import com.amazonaws.services.s3.model._
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ListBuffer, ArrayBuffer}
 import java.util.List
 
-class ScalaApplicationS3 {
+object ScalaS3Client {
 
   var s3Client: AmazonS3Client = null
 
-  def initializeS3Client(): Boolean = {
+  def initializeS3Client(accessKeyValue : String, secretKeyValue : String): Boolean = {
 
-    val accessKey = "##############################"
-    val secretKey = "########################################"
+    val accessKey = accessKeyValue
+    val secretKey = secretKeyValue
     val credentials = new BasicAWSCredentials(accessKey, secretKey)
     val clientConfig = new ClientConfiguration()
 
@@ -113,9 +108,9 @@ class ScalaApplicationS3 {
   }
 
 
-  def putFileObjectInBucket(bucketName: String, objectKey: String, file: File): Boolean = {
+  def putFileObjectInBucket(bucketName: String, objectKey: String, file: File): Unit = {
 
-    println("Uploading a new object to S3 from a file\n")
+    println("Uploading a new object to S3 from a file => File !\n")
 
     try {
       s3Client.putObject(new PutObjectRequest(bucketName, objectKey, file))
@@ -135,8 +130,6 @@ class ScalaApplicationS3 {
           + "such as not being able to access the network.")
         println("Error Message: " + ace.getMessage())
     }
-
-    true
   }
 
   def getObject(bucketName: String, objectKey: String, localFileLocation: String): S3Object = {
@@ -185,11 +178,11 @@ class ScalaApplicationS3 {
 
   }
 
-  def loadObjectFromS3ToSparkRDD(bucketName: String, objectKey: String) : RDD[String] = {
+  def loadObjectFromS3ToSparkRDD(bucketName: String, objectKey: String): RDD[String] = {
 
-   // val uri = "s3n://"+ accessKey + ":" + secretKey +"@" + bucketName + "/" + objectKey
+    // val uri = "s3n://"+ accessKey + ":" + secretKey +"@" + bucketName + "/" + objectKey
 
-    val uri = "s3n://"+ bucketName + "/" + objectKey
+    val uri = "s3n://" + bucketName + "/" + objectKey
 
     val context = SparkConfiguration.getConfiguredSpark
 
@@ -198,8 +191,6 @@ class ScalaApplicationS3 {
     inputRDD
 
   }
-
-
 
 
   def getS3ObjectContentsInFile(bucketName: String, objectKey: String, localFile: String): File = {
@@ -263,4 +254,107 @@ class ScalaApplicationS3 {
     true
   }
 
+  def S3ObjectWriter(bucketName: String, objectKey: String, elements: ListBuffer[ArrayBuffer[Element]]): Boolean = {
+
+    val elementArray = new ArrayBuffer[Element]
+
+    for (element <- elements) {
+
+      for (innerElement <- element) {
+
+        elementArray.append(innerElement)
+      }
+    }
+    objectWriter(bucketName, objectKey, elementArray)
+
+    true
+  }
+
+
+  def objectWriter(bucketName: String, objectKey: String, elements: ArrayBuffer[Element]): Boolean = {
+
+
+    println("Length => " + elements.length)
+
+
+    val temporaryFile = "tempFile.txt"
+
+    val file = new File(temporaryFile);
+
+    val writer = new OutputStreamWriter(new FileOutputStream(file))
+
+    elements.foreach({ element =>
+
+      val xPath = element.xpath
+      val data = element.data
+      val depth = element.depth
+      var attributes = ""
+
+      if (element.attributes.length == 0) {
+        attributes = ""
+      }
+      else {
+
+
+        element.attributes.foreach {
+
+          attribute => attributes += attribute.attributeName + ": " + attribute.attributeValue + " "
+
+        }
+      }
+      writer.write("xPath => " + xPath + ", " + "Data => " + data + ", " + "Depth => " + depth + ", " + "Attributes => " + attributes + "\n");
+    })
+    writer.close();
+
+    file.deleteOnExit()
+
+    println("Calling put file object...")
+    putFileObjectInBucket(bucketName, objectKey, file)
+    println("bucket => " + bucketName + " object => " + objectKey + " file =>" + file.getAbsolutePath)
+
+    println("Returned from put file object...")
+    true
+  }
 }
+
+
+/*
+def S3ObjectWriter(bucketName: String, objectKey: String, elements: ArrayBuffer[Element]): Boolean = {
+
+  val temporaryFile = "tempFile.txt"
+
+  val file = new File(temporaryFile);
+
+  val writer = new OutputStreamWriter(new FileOutputStream(file));
+
+  elements.foreach { element =>
+
+    val xPath = element.xpath
+    val data = element.data
+    val depth = element.depth
+    var attributes = ""
+
+    if (element.attributes.length == 0) {
+      attributes = ""
+    }
+    else {
+
+
+      element.attributes.foreach {
+
+        attribute => attributes += attribute.attributeName + ": " + attribute.attributeValue + " "
+
+      }
+    }
+    writer.write("xPath => " + xPath + ", " + "Data => " + data + ", " + "Depth => " + depth + ", " + "Attributes => " + attributes + "\n");
+  }
+  writer.close();
+
+  file.deleteOnExit()
+  putFileObjectInBucket(bucketName, objectKey, file)
+
+  true
+}
+*/
+
+

@@ -1,5 +1,5 @@
 /**
- * Created by Viresh on 5/26/2015.
+ * Created by Viresh on 6/1/15.
  */
 
 import javax.xml.xpath.XPathFactory
@@ -7,16 +7,11 @@ import javax.xml.parsers._
 import javax.xml.xpath.XPathConstants
 import org.xml.sax.InputSource
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{ListBuffer, ArrayBuffer}
 import org.w3c.dom._
 import java.io._
 
-class ScalaXMLParser {
-
-
-  case class Element(data: String, xpath: String, depth: Int, attributes: ArrayBuffer[Attribute])
-
-  case class Attribute(attributeName: String, attributeValue: String)
+object ScalaXMLParser {
 
   var domFactory: DocumentBuilderFactory = null
   var builder: DocumentBuilder = null
@@ -29,7 +24,6 @@ class ScalaXMLParser {
     builder = domFactory.newDocumentBuilder()
 
     true
-
   }
 
   def getDocumentBuilder(): DocumentBuilder = {
@@ -65,83 +59,86 @@ class ScalaXMLParser {
 
   }
 
+  def getAllChildNodes(doc: Node): NodeList = {
 
-  def parseDocument(doc: Document): ArrayBuffer[Element] = {
+    val xpath = XPathFactory.newInstance().newXPath()
+    val expr = xpath.compile("child::*") // This XPath Expression will fetch all the leaf nodes
+    val result = expr.evaluate(doc, XPathConstants.NODESET)
 
-    val elements = parser(doc)
+    val childNodes = result.asInstanceOf[NodeList]
 
-    elements
+    childNodes
 
   }
 
+  def getRoot(doc: Document): Node = {
 
-  /**
-   * @param doc
-			 * This function will execute an XPath expression to fetch all leaf element from a dom Document
-   */
+    doc.getFirstChild
+  }
 
-  def parser(doc: Document): ArrayBuffer[Element] = {
+  def parserDocument(doc: Document): ListBuffer[ArrayBuffer[Element]] = {
+
+    val root = getRoot(doc)
+    val allChildNodes: NodeList = getAllChildNodes(root)
+
+    val parsedXMLNodes = new ListBuffer[ArrayBuffer[Element]]
+
+    for (counter <- 0 to allChildNodes.getLength - 1) {
+      parsedXMLNodes.append(nodeProcessor(allChildNodes.item(counter), root.getNodeName))
+    }
+
+    parsedXMLNodes
+  }
+
+  def nodeProcessor(doc: Node, root: String): ArrayBuffer[Element] = {
 
     val xpath = XPathFactory.newInstance().newXPath()
-    val expr = xpath.compile("//*[not(*)]") // This XPath Expression will fetch all the leaf nodes
+    val expr = xpath.compile("descendant-or-self::*") // This XPath Expression will fetch all the descendant nodes
     val result = expr.evaluate(doc, XPathConstants.NODESET)
 
     val nodes = result.asInstanceOf[NodeList]
 
     var counter = 0
 
-    var elements = new ArrayBuffer[Element];
+    var elements = new ArrayBuffer[Element]
 
     /*The NodeList can be converted to an Iterable collection. For the time being I have used simple for.*/
     for (counter <- 0 to nodes.getLength - 1) {
 
-      var element = getPathWithXPath(nodes.item(counter));
-      elements.append(element)
+      println("Node Read = > " + nodes.item(counter).getNodeName)
 
+      val node = nodes.item(counter)
+      val parsedElement = parserEngine(node, root)
+
+      elements.append(parsedElement)
     }
     elements
   }
 
-
-  /**
-   * @param node
-	 * This function will fetch all the parent nodes for every node passed as parameter.
-   * And based on list of fetched ancestors, the XPath is built.
-   * This solution might be heavy from performance view point because at some point
-   * as it will fetch the whole document when reached to root.
-   */
-  def getPathWithXPath(node: Node): Element = {
+  def parserEngine(node: Node, root: String): Element = {
 
     val xpath = XPathFactory.newInstance().newXPath()
-
-    val expr = xpath.compile("ancestor::*") // This XPath Expression will fetch all the leaf nodes
+    val expr = xpath.compile("ancestor-or-self::*") // This XPath Expression will fetch all the ancestor nodes
     val result = expr.evaluate(node, XPathConstants.NODESET)
 
     val nodes = result.asInstanceOf[NodeList]
 
-    val path = new StringBuilder()
+    val path = xPathBuilder(nodes, root)
 
-    val value = node.getTextContent
+    val value = valueExtractor(node)
+
     val depth = nodes.getLength
 
     var attributes = new ArrayBuffer[Attribute]
 
     if (node.hasAttributes()) {
+
       attributes = attributeHandler(node)
     }
 
-    var counter: Int = 0
+    val xpathToElement = path
 
-    for (counter <- 0 to depth - 1) {
-
-      path.append(nodes.item(counter).getNodeName + "/")
-    }
-
-    path.append(node.getNodeName)
-
-    val xpathToElement = path.toString()
-
-    val nodeDepth = depth + 1
+    val nodeDepth = depth
 
     val element = new Element(value, xpathToElement, nodeDepth, attributes)
 
@@ -149,7 +146,56 @@ class ScalaXMLParser {
 
   }
 
-   def attributeHandler(node: Node): ArrayBuffer[Attribute] = {
+  def xPathBuilder(nodes: NodeList, root: String): String = {
+
+    val path = new StringBuilder
+
+    for (counter <- 0 to (nodes.getLength - 1)) {
+
+      path.append(nodes.item(counter).getNodeName + "/")
+    }
+
+    println("BuiltPath => " + path.toString())
+
+    path.toString()
+
+  }
+
+  def valueExtractor(node: Node): String = {
+
+    println("Type Node => " + node.getChildNodes.getLength + "=> " + node.getNodeName)
+
+    if (hasFurtherElements(node)) {
+      "PARENT_NODE"
+    } else {
+
+      if (node.getTextContent == "") {
+        "NO_DATA_CONTENT"
+      }
+      else {
+        node.getTextContent
+      }
+    }
+
+  }
+
+  def hasFurtherElements(node: Node): Boolean = {
+
+    val xpath = XPathFactory.newInstance().newXPath()
+    val expr = xpath.compile("descendant::*") // This XPath Expression will fetch all the decendent nodes
+    val result = expr.evaluate(node, XPathConstants.NODESET)
+
+    val nodes = result.asInstanceOf[NodeList]
+
+    if (nodes.getLength == 0) {
+      return false
+    }
+
+    true
+
+  }
+
+  def attributeHandler(node: Node): ArrayBuffer[Attribute] = {
 
     println("Processing attribute handler...")
 
@@ -170,76 +216,6 @@ class ScalaXMLParser {
 
     }
     attributes
-  }
-
-  def documentWriter(fileName: String, elements: ArrayBuffer[Element]): File = {
-
-    val file = new File(fileName);
-
-    val writer = new OutputStreamWriter(new FileOutputStream(file));
-
-    elements.foreach { element =>
-
-      val xPath = element.xpath
-      val data = element.data
-      val depth = element.depth
-      var attributes = ""
-
-      if (element.attributes.length == 0) {
-        attributes = ""
-      }
-      else {
-
-
-        element.attributes.foreach {
-
-          attribute => attributes += attribute.attributeName + ": " + attribute.attributeValue + " "
-
-        }
-      }
-      writer.write("xPath => " + xPath + ", " + "Data => " + data + ", " + "Depth => " + depth + ", " + "Attributes => " + attributes + "\n");
-    }
-    writer.close();
-    file
-  }
-
-
-  def S3ObjectWriter(s3Client: ScalaApplicationS3, bucketName: String, objectKey: String, elements: ArrayBuffer[Element]): Boolean = {
-
-    val temporaryFile = "tempFile.txt"
-
-    val file = new File(temporaryFile);
-
-    val writer = new OutputStreamWriter(new FileOutputStream(file));
-
-    elements.foreach { element =>
-
-      val xPath = element.xpath
-      val data = element.data
-      val depth = element.depth
-      var attributes = ""
-
-      if (element.attributes.length == 0) {
-        attributes = ""
-      }
-      else {
-
-
-        element.attributes.foreach {
-
-          attribute => attributes += attribute.attributeName + ": " + attribute.attributeValue + " "
-
-        }
-      }
-      writer.write("xPath => " + xPath + ", " + "Data => " + data + ", " + "Depth => " + depth + ", " + "Attributes => " + attributes + "\n");
-    }
-    writer.close();
-
-    file.deleteOnExit()
-    s3Client.putFileObjectInBucket(bucketName, objectKey, file)
-
-
-    true
   }
 
 
